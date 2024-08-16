@@ -1,0 +1,11 @@
+#!/bin/sh
+
+rm -rf io/o
+mkdir io/o
+
+cargo build -r
+cp target/release/mousikes io/o
+
+cd io
+
+./o/mousikes
