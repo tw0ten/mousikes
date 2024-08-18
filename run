@@ -1,13 +1,7 @@
 #!/bin/sh
 
-rm -rf io/o
-mkdir io/o
-
 cargo build -r
-cp target/release/mousikes io/o
+cp target/release/mousikes .
+./mousikes $* 
 
-cd io
-sudo cp o/mousikes /usr/bin
-
-cd i
-../o/mousikes $* 
+sudo mv mousikes /usr/bin

@@ -11,6 +11,7 @@ use ratatui::{
 };
 use rodio::{Decoder, OutputStream, Sink};
 use std::{
+    env,
     fs::{self, File},
     io::{self, stdout, BufReader},
     path::Path,
@@ -32,6 +33,11 @@ fn main() -> io::Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+
+    let location = &match env::current_dir() {
+        Ok(v) => v.display().to_string(),
+        _ => String::from("."),
+    };
 
     loop {
         if sink.empty() {
@@ -57,10 +63,10 @@ fn main() -> io::Result<()> {
             frame.render_widget(
                 Paragraph::new(format!(
                     "{{{}}}\n{} <{}>\n[{}] ({})",
-                    c(&s),
+                    if s == "" { t.to_string() } else { c(&s) },
                     if sink.is_paused() { "=" } else { "+" },
                     sink.volume(),
-                    &t,
+                    location,
                     sink.get_pos().as_secs()
                 )),
                 frame.area(),
@@ -120,9 +126,6 @@ fn main() -> io::Result<()> {
 }
 
 fn c(s: &String) -> String {
-    if s == "" {
-        return String::from("mousikes");
-    }
     for p in fs::read_dir(".").unwrap() {
         let p = p.expect("").path();
         if p.is_dir() {
