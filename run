@@ -9,4 +9,5 @@ cp target/release/mousikes io/o
 cd io
 sudo cp o/mousikes /usr/bin
 
-mousikes $* 
+cd i
+../o/mousikes $* 

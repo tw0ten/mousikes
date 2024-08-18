@@ -11,105 +11,56 @@ use ratatui::{
 };
 use rodio::{Decoder, OutputStream, Sink};
 use std::{
-    env,
     fs::{self, File},
     io::{self, stdout, BufReader},
+    path::Path,
     time::Duration,
 };
 
 const IDLE_POLL: Duration = Duration::from_millis(5000);
-
-fn c(s: &String, p: &String, t: &String) -> String {
-    if s == "" {
-        return t.to_string();
-    }
-    for entry in fs::read_dir(p).unwrap() {
-        let p = match entry {
-            Ok(p) => match p.path().file_name() {
-                Some(p) => p.to_string_lossy().to_string(),
-                _ => String::new(),
-            },
-            _ => String::new(),
-        };
-        if p.starts_with(s) {
-            return p.to_string();
-        }
-    }
-    s.to_string()
-}
-
-fn e(s: &String, p: &String, sink: &Sink) -> (String, String) {
-    let s = c(s,p,&String::new());
-    let mut t = "".to_string();
-    let mut p = p.to_string();
-    let dir = s.ends_with("/");
-    let s: Vec<&str> = s.split("/").collect();
-    if s.len() > 1 || dir {
-        p = s[0..s.len() - 1].join("/");
-    }
-    sink.clear();
-    if !dir {
-        t = s[s.len() - 1].to_string();
-        let source = Decoder::new(BufReader::new(
-            File::open(format!("./{}/{}", &p, &t)).unwrap(),
-        ))
-        .unwrap();
-        sink.append(source);
-        let _ = sink.try_seek(Duration::from_millis(0));
-    }
-    sink.play();
-    (t, p)
-}
+const SEEK: Duration = Duration::from_millis(1500);
 
 fn main() -> io::Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
     let sink = Sink::try_new(&stream_handle).unwrap();
-    sink.set_volume(0.5);
+    sink.set_volume(0.25);
     let mut rng = rand::thread_rng();
     let mut s = String::new();
-    {
-        let args: Vec<String> = env::args().collect();
-        if args.len() == 2 {
-            s = args[1].to_string();
-        }
-    }
-    let (mut t, mut p) = e(&s, &String::from("."), &sink);
-    s = String::new();
+    let mut t = String::new();
 
+    let mut interval = IDLE_POLL;
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let seek = Duration::from_millis(1500);
-    let mut interval = IDLE_POLL;
     loop {
         if sink.empty() {
-            let files: Vec<_> = fs::read_dir(&p)
+            let files: Vec<_> = fs::read_dir(".")
                 .unwrap()
                 .filter(|f| !f.as_ref().unwrap().path().is_dir())
                 .collect();
-            (t, p) = e(
-                &format!(
-                    "{}",
-                    files[rng.gen_range(0..files.len())]
+            if files.len() > 0 {
+                t = e(
+                    &files[rng.gen_range(0..files.len())]
                         .as_ref()
                         .unwrap()
                         .file_name()
                         .to_string_lossy()
-                ),
-                &p,
-                &sink,
-            );
+                        .to_string(),
+                    &t,
+                    &sink,
+                );
+            }
         }
 
         terminal.draw(|frame: &mut Frame| {
             frame.render_widget(
                 Paragraph::new(format!(
                     "{{{}}}\n{} <{}>\n[{}] ({})",
-                    c(&s, &p, &t),
+                    c(&s),
                     if sink.is_paused() { "=" } else { "+" },
                     sink.volume(),
-                    &p,
+                    &t,
                     sink.get_pos().as_secs()
                 )),
                 frame.area(),
@@ -121,10 +72,6 @@ fn main() -> io::Result<()> {
                 Event::Key(key) => match key.kind {
                     event::KeyEventKind::Press => match key.code {
                         KeyCode::Esc => break,
-                        KeyCode::Tab => match sink.is_paused() {
-                            true => sink.play(),
-                            false => sink.pause(),
-                        },
                         KeyCode::Up => sink.set_volume(
                             (1000.min((sink.volume() * 1000.0) as i32 + 25) as f32) / 1000.0,
                         ),
@@ -132,19 +79,26 @@ fn main() -> io::Result<()> {
                             (0.max((sink.volume() * 1000.0) as i32 - 25) as f32) / 1000.0,
                         ),
                         KeyCode::Left => {
-                            let _ = sink.try_seek(if sink.get_pos() > seek {
-                                sink.get_pos() - seek
+                            let _ = sink.try_seek(if sink.get_pos() > SEEK {
+                                sink.get_pos() - SEEK
                             } else {
                                 Duration::from_millis(0)
                             });
                         }
                         KeyCode::Right => {
-                            let _ = sink.try_seek(sink.get_pos() + seek * 10);
+                            let _ = sink.try_seek(sink.get_pos() + SEEK * 10);
                             sink.play();
                         }
                         KeyCode::Enter => {
-                            (t, p) = e(&s, &p, &sink);
-                            s = String::new();
+                            if s == "" {
+                                match sink.is_paused() {
+                                    true => sink.play(),
+                                    false => sink.pause(),
+                                };
+                            } else {
+                                t = e(&s, &t, &sink);
+                                s = String::new();
+                            }
                         }
                         KeyCode::Backspace => s = String::new(),
                         KeyCode::Char(v) => s.push_str(&String::from(v)),
@@ -159,7 +113,43 @@ fn main() -> io::Result<()> {
             }
         }
     }
+
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
+}
+
+fn c(s: &String) -> String {
+    if s == "" {
+        return String::from("mousikes");
+    }
+    for p in fs::read_dir(".").unwrap() {
+        let p = p.expect("").path();
+        if p.is_dir() {
+            continue;
+        }
+        let p = p.file_name().unwrap().to_string_lossy().to_string();
+        if p.starts_with(s) {
+            return p.to_string();
+        }
+    }
+    s.to_string()
+}
+
+fn e(s: &String, t: &String, sink: &Sink) -> String {
+    let s = c(s);
+    let p = Path::new(&s);
+    if p.exists() && !p.is_dir() {
+        match Decoder::new(BufReader::new(File::open(p).unwrap())) {
+            Ok(v) => {
+                sink.clear();
+                sink.append(v);
+                let _ = sink.try_seek(Duration::from_millis(0));
+                sink.play();
+                return p.file_name().unwrap().to_string_lossy().to_string();
+            }
+            _ => {}
+        }
+    }
+    t.to_string()
 }
