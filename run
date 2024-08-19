@@ -1,7 +1,0 @@
-#!/bin/sh
-
-cargo build -r
-cp target/release/mousikes .
-./mousikes $* 
-
-sudo mv mousikes /usr/bin
