@@ -14,7 +14,7 @@ use std::{
     env,
     fs::{self, File},
     io::{self, stdout, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -25,32 +25,28 @@ fn main() -> io::Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
     let sink = Sink::try_new(&stream_handle).unwrap();
     sink.set_volume(0.25);
-    let mut rng = rand::thread_rng();
-    let mut s = String::new();
-    let mut t = String::new();
 
-    let mut interval = IDLE_POLL;
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let location = &match env::current_dir() {
+    let mut rng = rand::thread_rng();
+    let location: &String = &match env::current_dir() {
         Ok(v) => v.display().to_string(),
         _ => String::from("."),
     };
 
+    let (mut s, mut t) = (String::new(), String::new());
+    let mut interval = IDLE_POLL;
+
     loop {
         if sink.empty() {
-            let files: Vec<_> = fs::read_dir(".")
-                .unwrap()
-                .filter(|f| !f.as_ref().unwrap().path().is_dir())
-                .collect();
+            let files = lsf();
             if files.len() > 0 {
                 t = e(
                     &files[rng.gen_range(0..files.len())]
-                        .as_ref()
-                        .unwrap()
                         .file_name()
+                        .unwrap()
                         .to_string_lossy()
                         .to_string(),
                     &t,
@@ -67,7 +63,7 @@ fn main() -> io::Result<()> {
                     if sink.is_paused() { "=" } else { "+" },
                     sink.volume(),
                     location,
-                    sink.get_pos().as_secs()
+                    sink.get_pos().as_secs(),
                 )),
                 frame.area(),
             );
@@ -125,15 +121,20 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+fn lsf() -> Vec<PathBuf> {
+    fs::read_dir(".")
+        .unwrap()
+        .map(|f| f.expect("").path())
+        .filter(|f| !f.is_dir())
+        .collect()
+}
+
 fn c(s: &String) -> String {
-    for p in fs::read_dir(".").unwrap() {
-        let p = p.expect("").path();
-        if p.is_dir() {
-            continue;
-        }
-        let p = p.file_name().unwrap().to_string_lossy().to_string();
-        if p.starts_with(s) {
-            return p.to_string();
+    let files = lsf();
+    for f in files {
+        let f = f.file_name().unwrap().to_string_lossy().to_string();
+        if f.starts_with(s) {
+            return f;
         }
     }
     s.to_string()
@@ -142,17 +143,18 @@ fn c(s: &String) -> String {
 fn e(s: &String, t: &String, sink: &Sink) -> String {
     let s = c(s);
     let p = Path::new(&s);
-    if p.exists() && !p.is_dir() {
-        match Decoder::new(BufReader::new(File::open(p).unwrap())) {
+    match File::open(p) {
+        Ok(v) => match Decoder::new(BufReader::new(v)) {
             Ok(v) => {
                 sink.clear();
-                sink.append(v);
                 let _ = sink.try_seek(Duration::from_millis(0));
+                sink.append(v);
                 sink.play();
                 return p.file_name().unwrap().to_string_lossy().to_string();
             }
             _ => {}
-        }
+        },
+        _ => {}
     }
     t.to_string()
 }
