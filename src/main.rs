@@ -19,7 +19,7 @@ use std::{
 };
 
 const IDLE_POLL: Duration = Duration::from_millis(5000);
-const SEEK: Duration = Duration::from_millis(1500);
+const SEEK: Duration = Duration::from_millis(5000);
 
 fn main() -> io::Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -31,9 +31,10 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
     let mut rng = rand::thread_rng();
-    let location: &String = &match env::current_dir() {
-        Ok(v) => v.display().to_string(),
-        _ => String::from("."),
+
+    let location: &str = match env::current_dir() {
+        Ok(v) => &v.display().to_string(),
+        _ => ".",
     };
 
     let (mut s, mut t) = (String::new(), String::new());
@@ -56,14 +57,21 @@ fn main() -> io::Result<()> {
         }
 
         terminal.draw(|frame: &mut Frame| {
+            let s = if s == "" { &t } else { &c(&s) };
             frame.render_widget(
                 Paragraph::new(format!(
-                    "{{{}}}\n{} <{}>\n[{}] ({})",
-                    if s == "" { t.to_string() } else { c(&s) },
-                    if sink.is_paused() { "=" } else { "+" },
+                    "{{{}}}\n{} <{}> ({})\n[{}]",
+                    s,
+                    if sink.empty() {
+                        "-"
+                    } else if sink.is_paused() {
+                        "="
+                    } else {
+                        "+"
+                    },
                     sink.volume(),
-                    location,
                     sink.get_pos().as_secs(),
+                    &location,
                 )),
                 frame.area(),
             );
@@ -80,28 +88,30 @@ fn main() -> io::Result<()> {
                         KeyCode::Down => sink.set_volume(
                             (0.max((sink.volume() * 1000.0) as i32 - 25) as f32) / 1000.0,
                         ),
-                        KeyCode::Left => {
-                            let _ = sink.try_seek(if sink.get_pos() > SEEK {
-                                sink.get_pos() - SEEK
-                            } else {
-                                Duration::from_millis(0)
-                            });
-                        }
-                        KeyCode::Right => {
-                            let _ = sink.try_seek(sink.get_pos() + SEEK * 10);
-                            sink.play();
-                        }
-                        KeyCode::Enter => {
-                            if s == "" {
-                                match sink.is_paused() {
-                                    true => sink.play(),
-                                    false => sink.pause(),
-                                };
-                            } else {
-                                t = e(&s, &t, &sink);
-                                s = String::new();
+                        KeyCode::Left => match sink.is_paused() {
+                            true => {
+                                _ = sink.try_seek(match sink.get_pos() > SEEK {
+                                    true => sink.get_pos() - SEEK,
+                                    _ => Duration::from_millis(0),
+                                })
                             }
-                        }
+                            _ => sink.pause(),
+                        },
+                        KeyCode::Right => match sink.is_paused() {
+                            true => sink.play(),
+                            _ => _ = sink.try_seek(sink.get_pos() + SEEK),
+                        },
+                        KeyCode::Tab => sink.clear(),
+                        KeyCode::Enter => match s.as_str() {
+                            "" => match sink.is_paused() {
+                                true => sink.play(),
+                                _ => sink.pause(),
+                            },
+                            _ => {
+                                t = e(&s, &t, &sink);
+                                s = String::new()
+                            }
+                        },
                         KeyCode::Backspace => s = String::new(),
                         KeyCode::Char(v) => s.push_str(&String::from(v)),
                         _ => {}
@@ -147,7 +157,7 @@ fn e(s: &String, t: &String, sink: &Sink) -> String {
         Ok(v) => match Decoder::new(BufReader::new(v)) {
             Ok(v) => {
                 sink.clear();
-                let _ = sink.try_seek(Duration::from_millis(0));
+                _ = sink.try_seek(Duration::from_millis(0));
                 sink.append(v);
                 sink.play();
                 return p.file_name().unwrap().to_string_lossy().to_string();
