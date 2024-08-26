@@ -19,12 +19,42 @@ use std::{
 };
 
 const IDLE_POLL: Duration = Duration::from_millis(5000);
+
 const SEEK: Duration = Duration::from_millis(5000);
+
+const VOLUME_MAX: f32 = 1.5;
+const VOLUME_SCALE: f32 = 1000.0;
+const VOLUME_CHANGE: i32 = 25;
 
 fn main() -> io::Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-    let sink = Sink::try_new(&stream_handle).unwrap();
-    sink.set_volume(0.25);
+    let sink = &Sink::try_new(&stream_handle).unwrap();
+    sink.set_volume(0.0);
+    sink.play();
+
+    {
+        let args: Vec<String> = env::args().collect();
+        let mut p = String::new();
+        for a in args {
+            let s = p;
+            p = String::new();
+            match s.as_str() {
+                "-v" | "--volume" => {
+                    sink.set_volume(VOLUME_MAX.min(0f32.max(a.parse().unwrap_or(sink.volume()))))
+                }
+                _ => match a.as_str() {
+                    "-p" | "--pause" => sink.pause(),
+                    "-h" | "--help" => {
+                        println!("mousikes");
+                        println!("\t-v | --volume <f32>");
+                        println!("\t-p | --pause");
+                        return Ok(());
+                    }
+                    _ => p = a,
+                },
+            }
+        }
+    }
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -41,7 +71,7 @@ fn main() -> io::Result<()> {
     let mut interval = IDLE_POLL;
 
     loop {
-        if sink.empty() {
+        if !sink.is_paused() && sink.empty() {
             let files = lsf();
             if files.len() > 0 {
                 t = e(
@@ -51,7 +81,7 @@ fn main() -> io::Result<()> {
                         .to_string_lossy()
                         .to_string(),
                     &t,
-                    &sink,
+                    sink,
                 );
             }
         }
@@ -62,12 +92,12 @@ fn main() -> io::Result<()> {
                 Paragraph::new(format!(
                     "{{{}}}\n{} <{}> ({})\n[{}]",
                     s,
-                    if sink.empty() {
-                        "-"
-                    } else if sink.is_paused() {
-                        "="
-                    } else {
-                        "+"
+                    match sink.is_paused() {
+                        true => "=",
+                        _ => match sink.empty() {
+                            false => "+",
+                            _ => "-",
+                        },
                     },
                     sink.volume(),
                     sink.get_pos().as_secs(),
@@ -83,32 +113,36 @@ fn main() -> io::Result<()> {
                     event::KeyEventKind::Press => match key.code {
                         KeyCode::Esc => break,
                         KeyCode::Up => sink.set_volume(
-                            (1000.min((sink.volume() * 1000.0) as i32 + 25) as f32) / 1000.0,
+                            (((VOLUME_SCALE * VOLUME_MAX) as i32)
+                                .min((sink.volume() * VOLUME_SCALE) as i32 + VOLUME_CHANGE)
+                                as f32)
+                                / VOLUME_SCALE,
                         ),
                         KeyCode::Down => sink.set_volume(
-                            (0.max((sink.volume() * 1000.0) as i32 - 25) as f32) / 1000.0,
+                            (((VOLUME_SCALE * 0.0) as i32)
+                                .max((sink.volume() * VOLUME_SCALE) as i32 - VOLUME_CHANGE)
+                                as f32)
+                                / VOLUME_SCALE,
                         ),
                         KeyCode::Left => match sink.is_paused() {
-                            true => {
-                                _ = sink.try_seek(match sink.get_pos() > SEEK {
-                                    true => sink.get_pos() - SEEK,
-                                    _ => Duration::from_millis(0),
-                                })
-                            }
-                            _ => sink.pause(),
+                            false => sink.pause(),
+                            _ => _ = sink.try_seek(sink.get_pos().saturating_sub(SEEK)),
                         },
                         KeyCode::Right => match sink.is_paused() {
                             true => sink.play(),
-                            _ => _ = sink.try_seek(sink.get_pos() + SEEK),
+                            _ => _ = sink.try_seek(sink.get_pos().saturating_add(SEEK)),
                         },
-                        KeyCode::Tab => sink.clear(),
+                        KeyCode::Tab => {
+                            sink.clear();
+                            sink.play()
+                        }
                         KeyCode::Enter => match s.as_str() {
                             "" => match sink.is_paused() {
                                 true => sink.play(),
                                 _ => sink.pause(),
                             },
                             _ => {
-                                t = e(&s, &t, &sink);
+                                t = e(&s, &t, sink);
                                 s = String::new()
                             }
                         },
@@ -157,7 +191,7 @@ fn e(s: &String, t: &String, sink: &Sink) -> String {
         Ok(v) => match Decoder::new(BufReader::new(v)) {
             Ok(v) => {
                 sink.clear();
-                _ = sink.try_seek(Duration::from_millis(0));
+                _ = sink.try_seek(Duration::ZERO);
                 sink.append(v);
                 sink.play();
                 return p.file_name().unwrap().to_string_lossy().to_string();
