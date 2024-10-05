@@ -14,11 +14,11 @@ use std::{
     env,
     fs::{self, File},
     io::{self, stdout, BufReader},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 
-const IDLE_POLL: Duration = Duration::from_millis(5000);
+const INTERVAL: Duration = Duration::from_millis(5000);
 
 const SEEK: Duration = Duration::from_millis(5000);
 
@@ -62,27 +62,18 @@ fn main() -> io::Result<()> {
 
     let mut rng = rand::thread_rng();
 
-    let location: &str = match env::current_dir() {
-        Ok(v) => &v.display().to_string(),
-        _ => ".",
-    };
+    let location = env::current_dir()
+        .unwrap_or(".".into())
+        .display()
+        .to_string();
 
     let (mut s, mut t) = (String::new(), String::new());
-    let mut interval = IDLE_POLL;
 
     loop {
         if !sink.is_paused() && sink.empty() {
-            let files = lsf();
+            let files = ls(".");
             if files.len() > 0 {
-                t = e(
-                    &files[rng.gen_range(0..files.len())]
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string(),
-                    &t,
-                    sink,
-                );
+                t = e(&files[rng.gen_range(0..files.len())], &t, sink);
             }
         }
 
@@ -92,12 +83,10 @@ fn main() -> io::Result<()> {
                 Paragraph::new(format!(
                     "{{{}}}\n{} <{}> ({})\n[{}]",
                     s,
-                    match sink.is_paused() {
-                        true => "=",
-                        _ => match sink.empty() {
-                            false => "+",
-                            _ => "-",
-                        },
+                    match (sink.is_paused(), sink.empty()) {
+                        (true, _) => "=",
+                        (_, false) => "+",
+                        _ => "-",
                     },
                     sink.volume(),
                     sink.get_pos().as_secs(),
@@ -107,7 +96,7 @@ fn main() -> io::Result<()> {
             );
         })?;
 
-        if event::poll(interval)? {
+        if event::poll(INTERVAL)? {
             match event::read()? {
                 Event::Key(key) => match key.kind {
                     event::KeyEventKind::Press => match key.code {
@@ -153,8 +142,6 @@ fn main() -> io::Result<()> {
                     _ => {}
                 },
                 Event::Paste(v) => s.push_str(&v),
-                Event::FocusGained => interval = Duration::from_millis(50),
-                Event::FocusLost => interval = IDLE_POLL,
                 _ => {}
             }
         }
@@ -165,18 +152,23 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn lsf() -> Vec<PathBuf> {
-    fs::read_dir(".")
-        .unwrap()
-        .map(|f| f.expect("").path())
-        .filter(|f| !f.is_dir())
-        .collect()
+fn ls(dir: &str) -> Vec<String> {
+    let mut o: Vec<String> = Vec::new();
+    if let Ok(v) = fs::read_dir(dir) {
+        for v in v.flatten() {
+            let v = v.path();
+            let s = v.to_string_lossy();
+            match v.is_dir() {
+                false => o.push(s[2..].to_string()),
+                _ => o.extend(ls(&s)),
+            }
+        }
+    }
+    o
 }
 
 fn c(s: &String) -> String {
-    let files = lsf();
-    for f in files {
-        let f = f.file_name().unwrap().to_string_lossy().to_string();
+    for f in ls(".") {
         if f.starts_with(s) {
             return f;
         }
@@ -187,18 +179,14 @@ fn c(s: &String) -> String {
 fn e(s: &String, t: &String, sink: &Sink) -> String {
     let s = c(s);
     let p = Path::new(&s);
-    match File::open(p) {
-        Ok(v) => match Decoder::new(BufReader::new(v)) {
-            Ok(v) => {
-                sink.clear();
-                _ = sink.try_seek(Duration::ZERO);
-                sink.append(v);
-                sink.play();
-                return p.file_name().unwrap().to_string_lossy().to_string();
-            }
-            _ => {}
-        },
-        _ => {}
+    if let Ok(v) = File::open(p) {
+        if let Ok(v) = Decoder::new(BufReader::new(v)) {
+            sink.clear();
+            _ = sink.try_seek(Duration::ZERO);
+            sink.append(v);
+            sink.play();
+            return p.to_string_lossy().to_string();
+        }
     }
     t.to_string()
 }
