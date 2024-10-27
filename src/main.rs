@@ -73,7 +73,7 @@ fn main() -> io::Result<()> {
         if !sink.is_paused() && sink.empty() {
             let files = ls(".");
             if files.len() > 0 {
-                t = e(&files[rng.gen_range(0..files.len())], &t, sink);
+                t = e(&files[rng.gen_range(0..files.len())], &t, sink)
             }
         }
 
