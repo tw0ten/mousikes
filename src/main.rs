@@ -22,9 +22,7 @@ const INTERVAL: Duration = Duration::from_millis(5000);
 
 const SEEK: Duration = Duration::from_millis(5000);
 
-const VOLUME_MAX: f32 = 1.5;
-const VOLUME_SCALE: f32 = 1000.0;
-const VOLUME_CHANGE: i32 = 25;
+const VOLUME_CHANGE: f32 = 1f32 / 64.0;
 
 fn main() -> io::Result<()> {
 	let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -40,7 +38,7 @@ fn main() -> io::Result<()> {
 			p = String::new();
 			match s.as_str() {
 				"-v" | "--volume" => {
-					sink.set_volume(VOLUME_MAX.min(0f32.max(a.parse().unwrap_or(sink.volume()))))
+					sink.set_volume(1f32.min(0f32.max(a.parse().unwrap_or(sink.volume()))))
 				}
 				_ => match a.as_str() {
 					"-p" | "--pause" => sink.pause(),
@@ -101,16 +99,8 @@ fn main() -> io::Result<()> {
 				Event::Key(key) => match key.kind {
 					event::KeyEventKind::Press => match key.code {
 						KeyCode::Esc => break,
-						KeyCode::Up => sink.set_volume(
-							(((VOLUME_SCALE * VOLUME_MAX) as i32)
-								.min((sink.volume() * VOLUME_SCALE) as i32 + VOLUME_CHANGE)
-								as f32) / VOLUME_SCALE,
-						),
-						KeyCode::Down => sink.set_volume(
-							(((VOLUME_SCALE * 0.0) as i32)
-								.max((sink.volume() * VOLUME_SCALE) as i32 - VOLUME_CHANGE)
-								as f32) / VOLUME_SCALE,
-						),
+						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + VOLUME_CHANGE)),
+						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - VOLUME_CHANGE)),
 						KeyCode::Left => match sink.is_paused() {
 							false => sink.pause(),
 							_ => _ = sink.try_seek(sink.get_pos().saturating_sub(SEEK)),
