@@ -1,3 +1,6 @@
+mod config;
+
+use config::*;
 use rand::Rng;
 use ratatui::{
 	crossterm::{
@@ -17,12 +20,6 @@ use std::{
 	path::Path,
 	time::Duration,
 };
-
-const INTERVAL: Duration = Duration::from_millis(5000);
-
-const SEEK: Duration = Duration::from_millis(5000);
-
-const VOLUME_CHANGE: f32 = 1f32 / 64.0;
 
 fn main() -> io::Result<()> {
 	let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -81,10 +78,12 @@ fn main() -> io::Result<()> {
 				Paragraph::new(format!(
 					"{{{}}}\n{} <{}> ({})\n[{}]",
 					s,
-					match (sink.is_paused(), sink.empty()) {
-						(true, _) => "=",
-						(_, false) => "+",
-						_ => "-",
+					match sink.is_paused() {
+						true => "=",
+						_ => match sink.empty() {
+							false => "+",
+							_ => "-",
+						},
 					},
 					sink.volume(),
 					sink.get_pos().as_secs(),
