@@ -98,20 +98,7 @@ fn main() -> io::Result<()> {
 				Event::Key(key) => match key.kind {
 					event::KeyEventKind::Press => match key.code {
 						KeyCode::Esc => break,
-						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + VOLUME_CHANGE)),
-						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - VOLUME_CHANGE)),
-						KeyCode::Left => match sink.is_paused() {
-							false => sink.pause(),
-							_ => _ = sink.try_seek(sink.get_pos().saturating_sub(SEEK)),
-						},
-						KeyCode::Right => match sink.is_paused() {
-							true => sink.play(),
-							_ => _ = sink.try_seek(sink.get_pos().saturating_add(SEEK)),
-						},
-						KeyCode::Tab => {
-							sink.clear();
-							sink.play()
-						}
+
 						KeyCode::Enter => match s.as_str() {
 							"" => match sink.is_paused() {
 								true => sink.play(),
@@ -122,6 +109,23 @@ fn main() -> io::Result<()> {
 								s = String::new()
 							}
 						},
+						KeyCode::Tab => {
+							sink.clear();
+							sink.play()
+						}
+
+						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + VOLUME_CHANGE)),
+						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - VOLUME_CHANGE)),
+
+						KeyCode::Left => match sink.is_paused() {
+							false => sink.pause(),
+							_ => _ = sink.try_seek(sink.get_pos().saturating_sub(SEEK)),
+						},
+						KeyCode::Right => match sink.is_paused() {
+							true => sink.play(),
+							_ => _ = sink.try_seek(sink.get_pos().saturating_add(SEEK)),
+						},
+
 						KeyCode::Backspace => s = String::new(),
 						KeyCode::Char(v) => s.push_str(&String::from(v)),
 						_ => {}

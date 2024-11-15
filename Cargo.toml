@@ -3,6 +3,6 @@ name = "mousikes"
 edition = "2021"
 
 [dependencies]
+rodio = "*"
 rand = "*"
 ratatui = "*"
-rodio = "*"
