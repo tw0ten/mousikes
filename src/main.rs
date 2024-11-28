@@ -28,12 +28,9 @@ fn main() -> io::Result<()> {
 	sink.play();
 
 	{
-		let args: Vec<String> = env::args().collect();
 		let mut p = String::new();
-		for a in args {
-			let s = p;
-			p = String::new();
-			match s.as_str() {
+		for a in env::args().skip(1) {
+			match p.as_str() {
 				"-v" | "--volume" => {
 					sink.set_volume(1f32.min(0f32.max(a.parse().unwrap_or(sink.volume()))))
 				}
@@ -45,9 +42,13 @@ fn main() -> io::Result<()> {
 						println!("\t-p | --pause");
 						return Ok(());
 					}
-					_ => p = a,
+					_ => {
+						p = a;
+						continue;
+					}
 				},
 			}
+			p.clear();
 		}
 	}
 
@@ -106,7 +107,7 @@ fn main() -> io::Result<()> {
 							},
 							_ => {
 								t = e(&s, &t, sink);
-								s = String::new()
+								s.clear();
 							}
 						},
 						KeyCode::Tab => {
@@ -126,8 +127,8 @@ fn main() -> io::Result<()> {
 							_ => _ = sink.try_seek(sink.get_pos().saturating_add(SEEK)),
 						},
 
-						KeyCode::Backspace => s = String::new(),
-						KeyCode::Char(v) => s.push_str(&String::from(v)),
+						KeyCode::Backspace => s.clear(),
+						KeyCode::Char(v) => s.push(v),
 						_ => {}
 					},
 					_ => {}
