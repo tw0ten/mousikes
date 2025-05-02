@@ -156,6 +156,7 @@ fn ls(dir: &str) -> Vec<String> {
 			}
 		}
 	}
+	o.sort();
 	o
 }
 
