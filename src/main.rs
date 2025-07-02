@@ -56,7 +56,7 @@ fn main() -> io::Result<()> {
 	stdout().execute(EnterAlternateScreen)?;
 	let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 
 	let location = env::current_dir()
 		.unwrap_or(".".into())
@@ -69,7 +69,7 @@ fn main() -> io::Result<()> {
 		if !sink.is_paused() && sink.empty() {
 			let files = ls(".");
 			if files.len() > 0 {
-				t = e(&files[rng.gen_range(0..files.len())], &t, sink)
+				t = e(&files[rng.random_range(0..files.len())], &t, sink)
 			}
 		}
 
@@ -156,13 +156,13 @@ fn ls(dir: &str) -> Vec<String> {
 			}
 		}
 	}
-	o.sort();
+	o.sort_by(|a, b| a.len().cmp(&b.len()));
 	o
 }
 
 fn c(s: &String) -> String {
 	for f in ls(".") {
-		if f.starts_with(s) {
+		if f.contains(s) {
 			return f;
 		}
 	}
