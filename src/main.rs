@@ -1,6 +1,5 @@
 mod config;
 
-use config::*;
 use rand::Rng;
 use ratatui::{
 	crossterm::{
@@ -12,7 +11,7 @@ use ratatui::{
 	widgets::Paragraph,
 	Frame, Terminal,
 };
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStreamBuilder, Sink};
 use std::{
 	env,
 	fs::{self, File},
@@ -22,8 +21,8 @@ use std::{
 };
 
 fn main() -> io::Result<()> {
-	let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-	let sink = &Sink::try_new(&stream_handle).unwrap();
+	let stream_handle = OutputStreamBuilder::open_default_stream().unwrap();
+	let sink = &Sink::connect_new(&stream_handle.mixer());
 	sink.set_volume(0.0);
 	sink.play();
 
@@ -74,10 +73,12 @@ fn main() -> io::Result<()> {
 		}
 
 		terminal.draw(|frame: &mut Frame| {
-			let s = if s == "" { &t } else { &c(&s) };
+			let search = s != "";
+			let s = if !search { &t } else { &c(&s) };
 			frame.render_widget(
 				Paragraph::new(format!(
-					"{{{}}}\n{} <{}> ({})\n[{}]",
+					"{}{}\n{} <{}> ({})\n[{}]",
+					if search { "/" } else { "" },
 					s,
 					match sink.is_paused() {
 						true => "=",
@@ -94,7 +95,7 @@ fn main() -> io::Result<()> {
 			);
 		})?;
 
-		if event::poll(INTERVAL)? {
+		if event::poll(config::INTERVAL)? {
 			match event::read()? {
 				Event::Key(key) => match key.kind {
 					event::KeyEventKind::Press => match key.code {
@@ -115,16 +116,16 @@ fn main() -> io::Result<()> {
 							sink.play()
 						}
 
-						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + VOLUME_CHANGE)),
-						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - VOLUME_CHANGE)),
+						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + config::VOLUME_CHANGE)),
+						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - config::VOLUME_CHANGE)),
 
 						KeyCode::Left => match sink.is_paused() {
 							false => sink.pause(),
-							_ => _ = sink.try_seek(sink.get_pos().saturating_sub(SEEK)),
+							_ => _ = sink.try_seek(sink.get_pos().saturating_sub(config::SEEK)),
 						},
 						KeyCode::Right => match sink.is_paused() {
 							true => sink.play(),
-							_ => _ = sink.try_seek(sink.get_pos().saturating_add(SEEK)),
+							_ => _ = sink.try_seek(sink.get_pos().saturating_add(config::SEEK)),
 						},
 
 						KeyCode::Backspace => s.clear(),
