@@ -4,24 +4,23 @@ use rand::Rng;
 use ratatui::{
 	crossterm::{
 		event::{self, Event, KeyCode},
-		terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-		ExecutableCommand,
+		terminal, ExecutableCommand,
 	},
+	layout::{Constraint, Layout},
 	prelude::CrosstermBackend,
-	widgets::Paragraph,
 	Frame, Terminal,
 };
-use rodio::{Decoder, OutputStreamBuilder, Sink};
+use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
 use std::{
-	env,
-	fs::{self, File},
-	io::{self, stdout, BufReader},
+	env, fs,
+	io::{self, stdout},
 	path::Path,
 	time::Duration,
 };
 
 fn main() -> io::Result<()> {
-	let stream_handle = OutputStreamBuilder::open_default_stream().unwrap();
+	let mut stream_handle = OutputStreamBuilder::open_default_stream().unwrap();
+	stream_handle.log_on_drop(false);
 	let sink = &Sink::connect_new(&stream_handle.mixer());
 	sink.set_volume(0.0);
 	sink.play();
@@ -51,8 +50,8 @@ fn main() -> io::Result<()> {
 		}
 	}
 
-	enable_raw_mode()?;
-	stdout().execute(EnterAlternateScreen)?;
+	terminal::enable_raw_mode()?;
+	stdout().execute(terminal::EnterAlternateScreen)?;
 	let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
 	let mut rng = rand::rng();
@@ -62,37 +61,64 @@ fn main() -> io::Result<()> {
 		.display()
 		.to_string();
 
-	let (mut s, mut t) = (String::new(), String::new());
+	let mut s = String::new();
+
+	let mut t = (String::new(), Duration::ZERO);
 
 	loop {
 		if !sink.is_paused() && sink.empty() {
 			let files = ls(".");
 			if files.len() > 0 {
-				t = e(&files[rng.random_range(0..files.len())], &t, sink)
+				t = e(&files[rng.random_range(0..files.len())], sink).unwrap_or(t)
 			}
 		}
 
 		terminal.draw(|frame: &mut Frame| {
-			let search = s != "";
-			let s = if !search { &t } else { &c(&s) };
-			frame.render_widget(
-				Paragraph::new(format!(
-					"{}{}\n{} <{}> ({})\n[{}]",
-					if search { "/" } else { "" },
-					s,
-					match sink.is_paused() {
-						true => "=",
-						_ => match sink.empty() {
-							false => "+",
-							_ => "-",
-						},
-					},
-					sink.volume(),
-					sink.get_pos().as_secs(),
-					&location,
-				)),
-				frame.area(),
-			);
+			use ratatui::{
+				style::{Style, Stylize},
+				widgets::{self, LineGauge},
+			};
+			use Constraint::{Length, Min};
+			let [title_area, _main_area, status_area] =
+				Layout::vertical([Length(2), Min(0), Length(1)]).areas(frame.area());
+			{
+				let progress = sink.get_pos();
+				frame.render_widget(
+					LineGauge::default()
+						.label("")
+						.ratio(if t.1.is_zero() {
+							0.0
+						} else {
+							progress.as_secs_f64() / t.1.as_secs_f64()
+						})
+						.filled_style(Style::new().white())
+						.style(Style::new().black()),
+					status_area,
+				);
+				{
+					let search = s != "";
+					let s = if !search { &t.0 } else { &c(&s) };
+					frame.render_widget(
+						widgets::Paragraph::new(format!(
+							"[{}] {}{}\n{} <{}> ({}/{})",
+							&location,
+							if search { "/" } else { "" },
+							s,
+							match sink.is_paused() {
+								true => "=",
+								_ => match sink.empty() {
+									false => "+",
+									_ => "-",
+								},
+							},
+							sink.volume(),
+							progress.as_secs(),
+							t.1.as_secs(),
+						)),
+						title_area,
+					);
+				}
+			}
 		})?;
 
 		if event::poll(config::INTERVAL)? {
@@ -107,17 +133,22 @@ fn main() -> io::Result<()> {
 								_ => sink.pause(),
 							},
 							_ => {
-								t = e(&s, &t, sink);
+								t = e(&s, sink).unwrap_or(t);
 								s.clear();
 							}
 						},
+
 						KeyCode::Tab => {
 							sink.clear();
 							sink.play()
 						}
 
-						KeyCode::Up => sink.set_volume(1f32.min(sink.volume() + config::VOLUME_CHANGE)),
-						KeyCode::Down => sink.set_volume(0f32.max(sink.volume() - config::VOLUME_CHANGE)),
+						KeyCode::Up => {
+							sink.set_volume(1f32.min(sink.volume() + config::VOLUME_CHANGE))
+						}
+						KeyCode::Down => {
+							sink.set_volume(0f32.max(sink.volume() - config::VOLUME_CHANGE))
+						}
 
 						KeyCode::Left => match sink.is_paused() {
 							false => sink.pause(),
@@ -140,8 +171,8 @@ fn main() -> io::Result<()> {
 		}
 	}
 
-	disable_raw_mode()?;
-	stdout().execute(LeaveAlternateScreen)?;
+	terminal::disable_raw_mode()?;
+	stdout().execute(terminal::LeaveAlternateScreen)?;
 	Ok(())
 }
 
@@ -157,6 +188,7 @@ fn ls(dir: &str) -> Vec<String> {
 			}
 		}
 	}
+	assert!(o.len() < 2_usize.pow(12));
 	o.sort_by(|a, b| a.len().cmp(&b.len()));
 	o
 }
@@ -170,17 +202,21 @@ fn c(s: &String) -> String {
 	s.to_string()
 }
 
-fn e(s: &String, t: &String, sink: &Sink) -> String {
+fn e(s: &String, sink: &Sink) -> Option<(String, Duration)> {
 	let s = c(s);
 	let p = Path::new(&s);
-	if let Ok(v) = File::open(p) {
-		if let Ok(v) = Decoder::new(BufReader::new(v)) {
+	if let Ok(v) = fs::File::open(p) {
+		if let Ok(v) = Decoder::try_from(v) {
+			let duration = v.total_duration();
 			sink.clear();
-			_ = sink.try_seek(Duration::ZERO);
 			sink.append(v);
+			_ = sink.try_seek(Duration::ZERO);
 			sink.play();
-			return p.to_string_lossy().to_string();
+			return Some((
+				p.to_string_lossy().to_string(),
+				duration.unwrap_or(Duration::ZERO),
+			));
 		}
 	}
-	t.to_string()
+	None
 }
