@@ -10,7 +10,7 @@ use ratatui::{
 	prelude::CrosstermBackend,
 	Frame, Terminal,
 };
-use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
+use rodio::{source::SineWave, Decoder, OutputStreamBuilder, Sink, Source};
 use std::{
 	env, fs,
 	io::{self, stdout},
@@ -82,28 +82,31 @@ fn main() -> io::Result<()> {
 			let [title_area, _main_area, status_area] =
 				Layout::vertical([Length(2), Min(0), Length(1)]).areas(frame.area());
 			{
+				let silence_break = sink.len() == 1;
 				let progress = sink.get_pos();
-				frame.render_widget(
-					LineGauge::default()
-						.label("")
-						.ratio(if t.1.is_zero() {
-							0.0
-						} else {
-							progress.as_secs_f64() / t.1.as_secs_f64()
-						})
-						.filled_style(Style::new().white())
-						.style(Style::new().black()),
-					status_area,
-				);
+				if !silence_break {
+					frame.render_widget(
+						LineGauge::default()
+							.label("")
+							.ratio(if t.1.is_zero() {
+								0.0
+							} else {
+								progress.as_secs_f64() / t.1.as_secs_f64()
+							})
+							.filled_style(Style::new().white())
+							.style(Style::new().black()),
+						status_area,
+					);
+				}
 				{
 					let search = s != "";
 					let s = if !search { &t.0 } else { &c(&s) };
 					frame.render_widget(
 						widgets::Paragraph::new(format!(
-							"[{}] {}{}\n{} <{}> ({}/{})",
+							"[{}] {}{}\n{} <{}> ({})",
 							&location,
 							if search { "/" } else { "" },
-							s,
+							if !search && silence_break { "" } else { s },
 							match sink.is_paused() {
 								true => "=",
 								_ => match sink.empty() {
@@ -112,8 +115,11 @@ fn main() -> io::Result<()> {
 								},
 							},
 							sink.volume(),
-							progress.as_secs(),
-							t.1.as_secs(),
+							if silence_break {
+								format!("-")
+							} else {
+								format!("{}/{}", progress.as_secs(), t.1.as_secs())
+							},
 						)),
 						title_area,
 					);
@@ -210,6 +216,11 @@ fn e(s: &String, sink: &Sink) -> Option<(String, Duration)> {
 			let duration = v.total_duration();
 			sink.clear();
 			sink.append(v);
+			sink.append(
+				SineWave::new(1.0)
+					.take_duration(config::SILENCE_PADDING)
+					.amplify(0.0),
+			);
 			_ = sink.try_seek(Duration::ZERO);
 			sink.play();
 			return Some((
