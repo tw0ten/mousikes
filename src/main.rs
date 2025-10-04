@@ -6,7 +6,6 @@ use ratatui::{
 		event::{self, Event, KeyCode},
 		terminal, ExecutableCommand,
 	},
-	layout::{Constraint, Layout},
 	prelude::CrosstermBackend,
 	Frame, Terminal,
 };
@@ -29,9 +28,9 @@ fn main() -> io::Result<()> {
 		let mut p = String::new();
 		for a in env::args().skip(1) {
 			match p.as_str() {
-				"-v" | "--volume" => {
-					sink.set_volume(1f32.min(0f32.max(a.parse().unwrap_or(sink.volume()))))
-				}
+				"-v" | "--volume" => sink.set_volume(
+					config::VOLUME_MAX.min(0f32.max(a.parse().unwrap_or(sink.volume()))),
+				),
 				_ => match a.as_str() {
 					"-p" | "--pause" => sink.pause(),
 					"-h" | "--help" => {
@@ -75,27 +74,33 @@ fn main() -> io::Result<()> {
 
 		terminal.draw(|frame: &mut Frame| {
 			use ratatui::{
+				layout::{Constraint, Layout, Margin},
 				style::{Style, Stylize},
-				widgets::{self, LineGauge},
+				widgets,
 			};
 			use Constraint::{Length, Min};
-			let [title_area, _main_area, status_area] =
-				Layout::vertical([Length(2), Min(0), Length(1)]).areas(frame.area());
+			let [area_title, _area_main, area_status] =
+				Layout::vertical([Length(1), Min(0), Length(1)]).areas(frame.area().inner(
+					Margin {
+						horizontal: 1,
+						vertical: 1,
+					},
+				));
 			{
 				let silence_break = sink.len() == 1;
 				let progress = sink.get_pos();
 				if !silence_break {
 					frame.render_widget(
-						LineGauge::default()
-							.label("")
+						widgets::LineGauge::default()
+							.label(format!("({}/{})", progress.as_secs(), t.1.as_secs()))
 							.ratio(if t.1.is_zero() {
 								0.0
 							} else {
 								progress.as_secs_f64() / t.1.as_secs_f64()
 							})
 							.filled_style(Style::new().white())
-							.style(Style::new().black()),
-						status_area,
+							.unfilled_style(Style::new().black()),
+						area_status,
 					);
 				}
 				{
@@ -103,10 +108,7 @@ fn main() -> io::Result<()> {
 					let s = if !search { &t.0 } else { &c(&s) };
 					frame.render_widget(
 						widgets::Paragraph::new(format!(
-							"[{}] {}{}\n{} <{}> ({})",
-							&location,
-							if search { "/" } else { "" },
-							if !search && silence_break { "" } else { s },
+							"{} <{:0<9}> [{}] {}{}",
 							match sink.is_paused() {
 								true => "=",
 								_ => match sink.empty() {
@@ -115,13 +117,11 @@ fn main() -> io::Result<()> {
 								},
 							},
 							sink.volume(),
-							if silence_break {
-								format!("-")
-							} else {
-								format!("{}/{}", progress.as_secs(), t.1.as_secs())
-							},
+							&location,
+							if search { "/" } else { "" },
+							if !search && silence_break { "" } else { s },
 						)),
-						title_area,
+						area_title,
 					);
 				}
 			}
@@ -149,9 +149,9 @@ fn main() -> io::Result<()> {
 							sink.play()
 						}
 
-						KeyCode::Up => {
-							sink.set_volume(1f32.min(sink.volume() + config::VOLUME_CHANGE))
-						}
+						KeyCode::Up => sink.set_volume(
+							config::VOLUME_MAX.min(sink.volume() + config::VOLUME_CHANGE),
+						),
 						KeyCode::Down => {
 							sink.set_volume(0f32.max(sink.volume() - config::VOLUME_CHANGE))
 						}
@@ -218,8 +218,8 @@ fn e(s: &String, sink: &Sink) -> Option<(String, Duration)> {
 			sink.append(v);
 			sink.append(
 				SineWave::new(1.0)
-					.take_duration(config::SILENCE_PADDING)
-					.amplify(0.0),
+					.amplify(0.0)
+					.take_duration(config::SILENCE_PADDING),
 			);
 			_ = sink.try_seek(Duration::ZERO);
 			sink.play();
